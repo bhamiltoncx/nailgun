@@ -25,6 +25,7 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -383,15 +384,21 @@ public class NGServer implements Runnable {
                     nailShutdown.invoke(null, argValues);
                     LOGGER.fine(nailClass.getName() + ".nailShutdown() exited cleanly.");
                 } catch (Throwable toDiscard) {
+                    Level level;
+                    if (toDiscard instanceof NoSuchMethodException) {
+                        level = Level.FINER;
+                    } else {
+                        level = Level.WARNING;
+                    }
                     LOGGER.log(
-                        Level.WARNING,
+                        level,
                         "Error calling nailShutdown() on " + nailClass.getName(),
                         toDiscard);
                 }
             }
         }
 
-        LOGGER.fine("Restoring system streams...");
+        LOGGER.finer("Restoring system streams...");
         // restore system streams
         System.setIn(in);
         System.setOut(out);
@@ -498,6 +505,8 @@ public class NGServer implements Runnable {
             return;
         }
 
+        LOGGER.fine("Starting up, args: " + Arrays.toString(args));
+
         // null server address means bind to everything local
         InetAddress serverAddress = null;
         int port = NGConstants.DEFAULT_PORT;
@@ -553,7 +562,7 @@ public class NGServer implements Runnable {
             runningPort = server.getPort();
         }
 
-        server.out.println("NGServer "
+        String startMessage = "NGServer "
                 + NGConstants.VERSION
                 + " started on "
                 + ((serverAddress == null)
@@ -561,7 +570,9 @@ public class NGServer implements Runnable {
                 : serverAddress.getHostAddress())
                 + ", port "
                 + runningPort
-                + ".");
+                + ".";
+        LOGGER.fine(startMessage);
+        server.out.println(startMessage);
     }
 
     public int getHeartbeatTimeout() {
