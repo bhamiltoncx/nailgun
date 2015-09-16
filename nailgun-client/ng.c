@@ -24,6 +24,7 @@
 #ifdef WIN32
 	#include <direct.h>
 	#include <winsock2.h>
+        #include <Windows.h>
 #else
 	#include <arpa/inet.h>
 	#include <netdb.h>
@@ -32,12 +33,12 @@
 	#include <sys/un.h>
 	#include <sys/time.h>
 	#include <sys/types.h>
+        #include <unistd.h>
 #endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 
@@ -50,7 +51,11 @@
 	HANDLE NG_STDOUT_FILENO;
 	HANDLE NG_STDERR_FILENO;
 	#define FILE_SEPARATOR '\\'
+        typedef int socklen_t;
+#ifndef MSG_WAITALL
 	#define MSG_WAITALL 0
+#endif
+	#define NAMED_PIPE_PREFIX "\\\\.\\pipe\\"
 #else
 	#define NG_STDIN_FILENO STDIN_FILENO
 	#define NG_STDOUT_FILENO STDOUT_FILENO
@@ -60,7 +65,7 @@
 	typedef unsigned int SOCKET;
 #endif
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(WIN32)
   #define SEND_FLAGS 0
 #else
   #define SEND_FLAGS MSG_NOSIGNAL
@@ -119,6 +124,10 @@
 /* the socket connected to the nailgun server */
 int nailgunsocket = 0;
 
+#ifdef WIN32
+HANDLE nailgunNamedPipe = INVALID_HANDLE_VALUE;
+#endif
+
 /* buffer used for receiving and writing nail output chunks */
 char buf[BUFSIZE];
 
@@ -138,10 +147,13 @@ void cleanUpAndExit (int exitCode) {
 
 
   #ifdef WIN32
-    CancelIo(STDIN_FILENO);
+    CancelIo(NG_STDIN_FILENO);
     WSACleanup();
     if (nailgunsocket) {
       closesocket(nailgunsocket);
+    }
+    if (nailgunNamedPipe != INVALID_HANDLE_VALUE) {
+      CloseHandle(nailgunNamedPipe);
     }
   #else
     close(nailgunsocket);
@@ -242,13 +254,35 @@ void sendChunk(unsigned int size, char chunkType, char* buf) {
   gettimeofday(&sendtime, NULL);
 #endif
 
-  bytesSent = sendAll(nailgunsocket, header, CHUNK_HEADER_LEN);
-  if (bytesSent != 0 && size > 0) {
-    bytesSent = sendAll(nailgunsocket, buf, size);
-  } else if (bytesSent == 0 && (chunkType != CHUNKTYPE_HEARTBEAT || !(errno == EPIPE || errno == ECONNRESET))) {
-    perror("send");
-    handleSocketClose();
+#ifdef WIN32
+  if (nailgunNamedPipe != INVALID_HANDLE_VALUE) {
+    DWORD bytesWritten;
+    if (!WriteFile(nailgunNamedPipe, header, CHUNK_HEADER_LEN, &bytesWritten, NULL)) {
+      handleError();
+    }
+    if (bytesWritten != CHUNK_HEADER_LEN) {
+      cleanUpAndExit(NAILGUN_SOCKET_FAILED);
+    }
+    if (!WriteFile(nailgunNamedPipe, buf, size, &bytesWritten, NULL)) {
+      handleError();
+    }
+    if (bytesWritten != size) {
+      cleanUpAndExit(NAILGUN_SOCKET_FAILED);
+    }
+  } else {
+#endif
+
+    bytesSent = sendAll(nailgunsocket, header, CHUNK_HEADER_LEN);
+    if (bytesSent != 0 && size > 0) {
+      bytesSent = sendAll(nailgunsocket, buf, size);
+    } else if (bytesSent == 0 && (chunkType != CHUNKTYPE_HEARTBEAT || !(errno == EPIPE || errno == ECONNRESET))) {
+      perror("send");
+      handleSocketClose();
+    }
+
+#ifdef WIN32
   }
+#endif
 
 #ifdef WIN32
   ReleaseMutex(sending);
@@ -313,7 +347,17 @@ void recvToFD(HANDLE destFD, char *buf, unsigned long len) {
     int bytesToRead = (BUFSIZE < bytesRemaining) ? BUFSIZE : bytesRemaining;
     int thisPass = 0;
     
-    thisPass = recv(nailgunsocket, buf, bytesToRead, MSG_WAITALL);
+#ifdef WIN32
+    if (nailgunNamedPipe != INVALID_HANDLE_VALUE) {
+      if (!ReadFile(nailgunNamedPipe, buf, bytesToRead, &thisPass, NULL)) {
+        handleError();
+      }
+    } else {
+#endif
+      thisPass = recv(nailgunsocket, buf, bytesToRead, MSG_WAITALL);
+#ifdef WIN32
+    }
+#endif
     if (thisPass == 0 || thisPass == -1) {
       perror("recv");
       handleSocketClose();
@@ -610,8 +654,8 @@ int isNailgunClientName(char *s) {
   return (1);
   #else
   #ifdef WIN32
-  return (!strcasecmp(s, NAILGUN_CLIENT_NAME) ||
-           !strcasecmp(s, NAILGUN_CLIENT_NAME_EXE));
+  return (!lstrcmpiA(s, NAILGUN_CLIENT_NAME) ||
+           !lstrcmpiA(s, NAILGUN_CLIENT_NAME_EXE));
   #else
   return(!(strcmp(s, NAILGUN_CLIENT_NAME)));
   #endif
@@ -752,10 +796,21 @@ int main(int argc, char *argv[], char *env[]) {
     usage(NAILGUN_BAD_ARGUMENTS);
   }
 
-  #ifndef WIN32
     if (strncmp(nailgun_server, "local:", 6) == 0) {
       const char *socket_path = nailgun_server + 6;
       size_t socket_path_len = strlen(socket_path);
+  #ifdef WIN32
+      char named_pipe_path[257];
+      if (strncmp(socket_path, NAMED_PIPE_PREFIX, strlen(NAMED_PIPE_PREFIX)) != 0) {
+        _snprintf(named_pipe_path, 256, "%s%s", NAMED_PIPE_PREFIX, socket_path);
+        named_pipe_path[256] = '\0';
+        socket_path = named_pipe_path;
+      }
+      nailgunNamedPipe = CreateFile(socket_path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+      if (nailgunNamedPipe == INVALID_HANDLE_VALUE) {
+        handleError();
+      }
+  #else
       if (socket_path_len > sizeof(server_addr_un.sun_path) - 1) {
         fprintf(stderr, "Socket path [%s] too long (%ld)\n", socket_path, (long) socket_path_len);
         cleanUpAndExit(NAILGUN_SOCKET_FAILED);
@@ -774,9 +829,8 @@ int main(int argc, char *argv[], char *env[]) {
       #endif
       server_addr = (struct sockaddr *)&server_addr_un;
       server_addr_len = sizeof(server_addr_un);
-    } else {
   #endif
-
+    } else {
       /* jump through a series of connection hoops */
       hostinfo = gethostbyname(nailgun_server);
 
@@ -799,15 +853,18 @@ int main(int argc, char *argv[], char *env[]) {
       memset(&(server_addr_in.sin_zero), '\0', 8);
       server_addr = (struct sockaddr *)&server_addr_in;
       server_addr_len = sizeof(server_addr_in);
-
-  #ifndef WIN32
     }
-  #endif
 
-  if (connect(nailgunsocket, server_addr, server_addr_len) == -1) {
-    perror("connect");
-    cleanUpAndExit(NAILGUN_CONNECT_FAILED);
-  } 
+#ifdef WIN32
+  if (nailgunNamedPipe == INVALID_HANDLE_VALUE) {
+#endif
+    if (connect(nailgunsocket, server_addr, server_addr_len) == -1) {
+      perror("connect");
+      cleanUpAndExit(NAILGUN_CONNECT_FAILED);
+    } 
+#ifdef WIN32
+  }
+#endif
     
   /* ok, now we're connected.  first send all of the command line
      arguments for the server, if any.  remember that we may have
