@@ -24,7 +24,6 @@ import java.util.Arrays;
 import java.util.List;
 
 import com.sun.jna.FromNativeContext;
-import com.sun.jna.IntegerType;
 import com.sun.jna.LastErrorException;
 import com.sun.jna.Native;
 import com.sun.jna.Platform;
@@ -32,7 +31,7 @@ import com.sun.jna.Pointer;
 import com.sun.jna.PointerType;
 import com.sun.jna.Structure;
 import com.sun.jna.Union;
-import com.sun.jna.ptr.ByReference;
+import com.sun.jna.ptr.IntByReference;
 
 import com.sun.jna.win32.StdCallLibrary;
 import com.sun.jna.win32.W32APIOptions;
@@ -53,45 +52,15 @@ public interface NGWin32NamedPipeLibrary extends StdCallLibrary {
   NGWin32NamedPipeLibrary INSTANCE = (NGWin32NamedPipeLibrary) Native.loadLibrary(
       "kernel32", NGWin32NamedPipeLibrary.class, W32APIOptions.UNICODE_OPTIONS);
 
-  public static class DWORD extends IntegerType {
-    public static final int SIZE = 4;
-    public DWORD() {
-      this(0);
-    }
-
-    public DWORD(long value) {
-      super(SIZE, value, true);
-    }
-  }
-
-  public class DWORDByReference extends ByReference {
-    public DWORDByReference() {
-      this(new DWORD(0));
-    }
-
-    public DWORDByReference(DWORD value) {
-      super(DWORD.SIZE);
-      setValue(value);
-    }
-
-    public void setValue(DWORD value) {
-      getPointer().setInt(0, value.intValue());
-    }
-
-    public DWORD getValue() {
-      return new DWORD(getPointer().getInt(0));
-    }
-  }
-
   public static class SECURITY_ATTRIBUTES extends Structure {
-    public DWORD dwLength;
+    public int dwLength;
     public Pointer lpSecurityDescriptor;
     public boolean bInheritHandle;
     protected List getFieldOrder() {
       return Arrays.asList(new String[] { "dwLength", "lpSecurityDescriptor", "bInheritHandle" });
     }
     public SECURITY_ATTRIBUTES() {
-      dwLength = new DWORD(size());
+      dwLength = size();
     }
   }
 
@@ -106,7 +75,7 @@ public interface NGWin32NamedPipeLibrary extends StdCallLibrary {
     public Object fromNative(Object nativeValue, FromNativeContext context) {
       Object o = super.fromNative(nativeValue, context);
       if (INVALID_HANDLE_VALUE.equals(o)) {
-	return INVALID_HANDLE_VALUE;
+        return INVALID_HANDLE_VALUE;
       }
       return o;
     }
@@ -114,18 +83,26 @@ public interface NGWin32NamedPipeLibrary extends StdCallLibrary {
   
   HANDLE CreateNamedPipe(
     char[] lpName,
-    DWORD dwOpenMode,
-    DWORD dwPipeMode,
-    DWORD nMaxInstances,
-    DWORD nOutBufferSize,
-    DWORD nInBufferSize,
-    DWORD nDefaultTimeOut,
+    int dwOpenMode,
+    int dwPipeMode,
+    int nMaxInstances,
+    int nOutBufferSize,
+    int nInBufferSize,
+    int nDefaultTimeOut,
     SECURITY_ATTRIBUTES lpSecurityAttributes);
   boolean ConnectNamedPipe(HANDLE hNamedPipe, Pointer lpOverlapped);
   boolean ReadFile(
     HANDLE hFile,
     ByteBuffer lpBuffer,
-    DWORD nNumberOfBytesToRead,
-    DWORDByReference lpNumberOfBytesRead,
+    int nNumberOfBytesToRead,
+    IntByReference lpNumberOfBytesRead,
     Pointer lpOverlapped);
+  boolean WriteFile(
+    HANDLE hFile,
+    ByteBuffer lpBuffer,
+    int nNumberOfBytesToWrite,
+    IntByReference lpNumberOfBytesWritten,
+    Pointer lpOverlapped);
+  boolean DisconnectNamedPipe(HANDLE hObject);
+  boolean CloseHandle(HANDLE hObject);
 }

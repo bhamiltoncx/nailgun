@@ -17,6 +17,8 @@
  */
 package com.martiansoftware.nailgun;
 
+import com.sun.jna.Platform;
+
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.lang.reflect.Method;
@@ -425,7 +427,11 @@ public class NGServer implements Runnable {
                     serversocket = new ServerSocket(listeningAddress.getInetPort(), 0, listeningAddress.getInetAddress());
                 }
             } else {
-                serversocket = new NGUnixDomainServerSocket(listeningAddress.getLocalAddress());
+                if (Platform.isWindows()) {
+                    serversocket = new NGWin32NamedPipeServerSocket(listeningAddress.getLocalAddress());
+                } else {
+                    serversocket = new NGUnixDomainServerSocket(listeningAddress.getLocalAddress());
+                }
             }
             while (!shutdown) {
                 sessionOnDeck = sessionPool.take();
