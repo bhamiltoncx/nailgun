@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import ctypes
+import json
 import platform
 import optparse
 import os
@@ -49,6 +50,7 @@ CHUNKTYPE_CMD = 'C'
 CHUNKTYPE_EXIT = 'X'
 CHUNKTYPE_SENDINPUT = 'S'
 CHUNKTYPE_HEARTBEAT = 'H'
+CHUNKTYPE_JSON_EXEC = 'J'
 
 NSEC_PER_SEC = 1000000000
 
@@ -383,6 +385,24 @@ def process_exit(exit_len, nailgun_connection):
     nailgun_connection.exit_code = int(''.join(nailgun_connection.buf.raw[:num_bytes]))
 
 
+def process_json_exec(json_exec_len, nailgun_connection):
+    '''
+    Receives a JSON exec payload from the nailgun server. Executes
+    the specified program. Does not return.
+    '''
+    num_bytes = min(len(nailgun_connection.buf), json_exec_len)
+    recv_to_buffer(num_bytes, nailgun_connection.buf, nailgun_connection)
+    print >>sys.stderr, 'Got buf: [{0}]'.format(nailgun_connection.buf.raw[:num_bytes])
+    exec_payload = json.loads(nailgun_connection.buf.raw[:num_bytes])
+    path = exec_payload.get('path')
+    cwd = exec_payload.get('cwd')
+    args = exec_payload.get('args', [])
+    env = exec_payload.get('env', os.environ)
+    if cwd:
+        os.chdir(cwd)
+    os.execve(path, args, env)
+
+
 def send_heartbeat(nailgun_connection):
     '''
     Sends a heartbeat to the nailgun server to indicate the client is still alive.
@@ -434,6 +454,8 @@ def process_nailgun_stream(nailgun_connection):
         with nailgun_connection.ready_to_send_condition:
             # Wake up the stdin thread and tell it to read as much data as possible.
             nailgun_connection.ready_to_send_condition.notify()
+    elif chunk_type == CHUNKTYPE_JSON_EXEC:
+        process_json_exec(chunk_len, nailgun_connection)
     else:
         raise NailgunException(
             'Unexpected chunk type: {0}'.format(chunk_type),

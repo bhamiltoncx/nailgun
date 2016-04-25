@@ -71,6 +71,11 @@ public class NGContext {
 	private PrintStream exitStream = null;
 
 	/**
+	 * A stream to which a JSON-encoded exec payload can be printed
+	 */
+	private PrintStream jsonExecStream = null;
+
+	/**
 	 * The NGServer that accepted this connection
 	 */
 	private NGServer server = null;
@@ -107,6 +112,10 @@ public class NGContext {
 	
 	public void setExitStream(PrintStream exitStream) {
 		this.exitStream = exitStream;
+	}
+
+  	public void setJsonExecStream(PrintStream jsonExecStream) {
+		this.jsonExecStream = jsonExecStream;
 	}
 
 	public void setPort(int remotePort) {
@@ -220,6 +229,22 @@ public class NGContext {
 	 */
 	public void exit(int exitCode) {
 		exitStream.println(exitCode);
+	}
+
+	/**
+	 * Sends a JSON-encoded exec command to the client.  The
+	 * client will no longer respond to commands after this;
+	 * you probably want to return from nailMain immediately after
+	 * calling this.
+	 *
+	 * @param payload JSON-encoded string containing keys:
+         * "path": "/path/to/exec",
+         * "argv": ["argv0", "argv1", ...],
+         * "env": {"env1": "val1", ...},
+         * "cwd": "/path/to/cwd",
+	 */
+        public void jsonExec(String payload) {
+		jsonExecStream.println(payload);
 	}
 
 	/**

@@ -259,12 +259,14 @@ public class NGSession extends Thread {
                 PrintStream out = null;
                 PrintStream err = null;
                 PrintStream exit = null;
+                PrintStream jsonExec = null;
 
                 try {
                     in = new NGInputStream(sockin, sockout, server.out, heartbeatTimeoutMillis);
                     out = new PrintStream(new NGOutputStream(sockout, NGConstants.CHUNKTYPE_STDOUT));
                     err = new PrintStream(new NGOutputStream(sockout, NGConstants.CHUNKTYPE_STDERR));
                     exit = new PrintStream(new NGOutputStream(sockout, NGConstants.CHUNKTYPE_EXIT));
+                    jsonExec = new PrintStream(new NGOutputStream(sockout, NGConstants.CHUNKTYPE_JSON_EXEC));
 
                     // ThreadLocal streams for System.in/out/err redirection
                     ((ThreadLocalInputStream) System.in).init(in);
@@ -312,6 +314,7 @@ public class NGSession extends Thread {
                                 context.err = err;
                                 context.setCommand(command);
                                 context.setExitStream(exit);
+                                context.setJsonExecStream(jsonExec);
                                 context.setNGServer(server);
                                 context.setEnv(remoteEnv);
                                 context.setInetAddress(socket.getInetAddress());
@@ -377,6 +380,9 @@ public class NGSession extends Thread {
                     }
                     if (exit != null) {
                         exit.close();
+                    }
+                    if (jsonExec != null) {
+                        jsonExec.close();
                     }
                     LOG.log(Level.FINE, "Flushing client socket");
                     sockout.flush();

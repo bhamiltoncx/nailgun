@@ -88,6 +88,12 @@ public class NGConstants {
     public static final byte CHUNKTYPE_HEARTBEAT = 'H';
 
     /**
+     * Chunk type marker for a JSON-encoded exec payload indicating the client
+     * should exec() a process with a specified environment and cwd.
+     */
+    public static final byte CHUNKTYPE_JSON_EXEC = 'J';
+
+  /**
      * Server version number
      */
     public static final String VERSION;
